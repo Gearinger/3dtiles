@@ -1,0 +1,107 @@
+# Windows 构建并发布 Release Workflow
+# 触发：push 到 tag (v*.*.*) 或手动触发（workflow_dispatch，可输入 tag）
+name: Build Windows EXE and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0). If empty, workflow will try to use the pushed tag.'
+        required: false
+
+jobs:
+  build-windows-release:
+    name: Build on Windows and publish Release
+    runs-on: windows-latest
+    env:
+      # 如果仓库里有 vcpkg 子目录，这里设定 VCPKG_ROOT 指向工作区下的 vcpkg
+      VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Prepare vcpkg (if present)
+        shell: pwsh
+        run: |
+          if (Test-Path -Path "$env:GITHUB_WORKSPACE\vcpkg") {
+            Push-Location "$env:GITHUB_WORKSPACE\vcpkg"
+            Write-Host "Bootstrapping vcpkg..."
+            .\bootstrap-vcpkg.bat
+            Pop-Location
+          } else {
+            Write-Host "vcpkg not found, skipping vcpkg bootstrap."
+          }
+
+      - name: Setup Rust (stable)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Verify rust & cargo
+        shell: pwsh
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Build (cargo release)
+        shell: pwsh
+        run: |
+          # 确保在仓库根执行构建（若需要，请在 cargo build 前设置任何额外 env）
+          cargo build --release -v
+
+      - name: Collect EXE artifacts and zip
+        id: pack
+        shell: pwsh
+        run: |
+          $outDir = Join-Path $env:GITHUB_WORKSPACE 'release_artifacts'
+          if (-Not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
+
+          Write-Host "Searching for .exe files under target\release..."
+          $exeFiles = Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'target\release') -Filter *.exe -Recurse -ErrorAction SilentlyContinue
+          if (-not $exeFiles) {
+            Write-Host "No .exe files found in target/release. Listing target/release content:"
+            Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'target\release') -Recurse | ForEach-Object { Write-Host $_.FullName }
+            throw "No executables found to package."
+          }
+
+          foreach ($f in $exeFiles) {
+            Write-Host "Copying $($f.FullName) to $outDir"
+            Copy-Item -Path $f.FullName -Destination $outDir -Force
+          }
+
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE 'release.zip'
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path (Join-Path $outDir '*') -DestinationPath $zipPath -Force
+
+          Write-Host "ZIP created at: $zipPath"
+          Write-Output "::set-output name=zip_path::$zipPath"
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # 优先使用手动输入的 tag（workflow_dispatch），否则尝试使用推送的 tag 名称
+          tag_name: ${{ coalesce(github.event.inputs.tag, github.ref_name) }}
+          release_name: ${{ coalesce(github.event.inputs.tag, github.ref_name) }}
+          draft: false
+          prerelease: false
+          body: "Automatic release created by GitHub Actions: ${{ coalesce(github.event.inputs.tag, github.ref_name) }}"
+
+      - name: Upload release asset (zip)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.pack.outputs.zip_path }}
+          asset_name: 3dtiles-windows-release.zip
+          asset_content_type: application/zip
