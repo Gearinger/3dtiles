@@ -1,72 +1,75 @@
-# Windows 构建并发布 Release Workflow（支持手动触发）
-name: Build Windows EXE and Release
+name: Build and push Docker image
 
 on:
   push:
+    # trigger on tags like v1.2.3 (also allow any tag)
     tags:
-      - 'v*.*.*'
+      - 'v*'
+      - '*'
+    branches:
+      - main
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Release tag (e.g. v0.1.0). If empty, a fallback tag manual-<run_id> will be used.'
+      image_version:
+        description: '镜像版本号（例如 v1.2.3 或 1.2.3）。如果留空：push tag 时使用 tag 名；否则使用 commit sha.'
         required: false
-      release_name:
-        description: 'Release title (optional).'
-        required: false
-      create_release:
-        description: 'Whether to create GitHub Release and upload asset (true/false).'
-        required: false
-        default: 'true'
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  build-windows-release:
-    name: Build on Windows and publish Release
-    runs-on: windows-latest
-    env:
-      # 如果仓库里有 vcpkg 子目录，这里设定 VCPKG_ROOT 指向工作区下的 vcpkg
-      VCPKG_ROOT: ${{ github.workspace }}\vcpkg
-
+  build-and-push:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository (with submodules)
+      - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Set up QEMU (for multi-arch builds)
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
         with:
-          submodules: 'recursive'
+          buildkitd-flags: --debug
 
-      - name: Prepare vcpkg (if present)
-        shell: pwsh
-        run: |
-          if (Test-Path -Path "$env:GITHUB_WORKSPACE\vcpkg") {
-            Push-Location "$env:GITHUB_WORKSPACE\vcpkg"
-            Write-Host "Bootstrapping vcpkg..."
-            .\bootstrap-vcpkg.bat
-            Pop-Location
-          } else {
-            Write-Host "vcpkg not found, skipping vcpkg bootstrap."
-          }
-
-      - name: Setup Rust (stable)
-        uses: actions-rs/toolchain@v1
+      - name: Login to registry
+        uses: docker/login-action@v2
         with:
-          toolchain: stable
-          override: true
+          registry: registry.cn-hangzhou.aliyuncs.com
+          username: ${{ secrets.ALIYUN_REGISTRY_USERNAME }}
+          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
 
-      - name: Verify rust & cargo
-        shell: pwsh
+      - name: Determine image tag
+        id: tag
         run: |
-          rustc --version
-          cargo --version
+          # Prefer workflow_dispatch input if provided
+          if [ -n "${{ github.event.inputs.image_version }}" ]; then
+            TAG="${{ github.event.inputs.image_version }}"
+          # If this run is triggered by a tag push, use the tag name
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            # Fallback: short commit sha
+            TAG="${GITHUB_SHA::8}"
+          fi
+          echo "Determined image tag: $TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Build (cargo release)
-        shell: pwsh
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            registry.cn-hangzhou.aliyuncs.com/gear-repo/tiles:${{ steps.tag.outputs.tag }}
+            registry.cn-hangzhou.aliyuncs.com/gear-repo/tiles:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Output image reference
         run: |
-          # 确保在仓库根执行构建（若需要，请在 cargo build 前设置任何额外 env）
-          cargo build --release -v
-
-      - name: Collect EXE artifacts and zip
-        id: pack
-        shell: pwsh
-        run: |
-          $outDir = Join-Path $env:GITHUB_WORKSPACE 'release_artifacts'
-          if (-Not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
-
-          Write-Host "Searching for .
+          echo "Image pushed: registry.cn-hangzhou.aliyuncs.com/gear-repo/tiles:${{ steps.tag.outputs.tag }}"
