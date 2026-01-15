@@ -24,6 +24,13 @@ jobs:
     # 2. 设置 Docker Buildx
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+        override: true
     
     # 3. 登录到阿里云容器镜像服务
     - name: Log in to Alibaba Cloud Container Registry
