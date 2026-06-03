@@ -23,17 +23,16 @@ jobs:
             libx11-dev libxrandr-dev libxi-dev libxxf86vm-dev \
             autoconf autoconf-archive automake libtool pkg-config
 
-      # 让 lukka/run-vcpkg 自动通过 GitHub Actions Cache (GitHub Actions OIDC) 处理缓存
       - name: Setup and Run vcpkg
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: '84bab45d415d22042bd0b9081aea57f362da3f35'
           runVcpkgInstall: true
-          # 关键点：追加 --allow-unsupported 参数强制在 ARM64 上编译 basisu
-          vcpkgArguments: '--allow-unsupported'
         env:
           VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
           VCPKG_DEFAULT_TRIPLET: arm64-linux
+          # 核心修正：利用环境变量给所有 vcpkg 命令默认追加该参数
+          VCPKG_COMMAND_OPTIONS: "--allow-unsupported"
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
