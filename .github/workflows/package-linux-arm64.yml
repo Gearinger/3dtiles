@@ -29,6 +29,8 @@ jobs:
         with:
           vcpkgGitCommitId: '84bab45d415d22042bd0b9081aea57f362da3f35'
           runVcpkgInstall: true
+          # 关键点：追加 --allow-unsupported 参数强制在 ARM64 上编译 basisu
+          vcpkgArguments: '--allow-unsupported'
         env:
           VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
           VCPKG_DEFAULT_TRIPLET: arm64-linux
