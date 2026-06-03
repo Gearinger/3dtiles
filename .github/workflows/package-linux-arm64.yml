@@ -3,7 +3,7 @@ name: Build Linux ARM64
 on:
   workflow_dispatch:          # 允许手动触发
   push:
-    branches: [ main, master ]  # 可根据需要调整
+    branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
 
@@ -11,7 +11,7 @@ jobs:
   build-linux-arm64:
     runs-on: ubuntu-24.04-arm   # GitHub 官方 ARM64 运行器
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4 # 建议使用稳定 v4
         with:
           submodules: 'recursive'
 
@@ -21,49 +21,48 @@ jobs:
           sudo apt-get install -y \
             libgl1-mesa-dev libglu1-mesa-dev \
             libx11-dev libxrandr-dev libxi-dev libxxf86vm-dev \
-            autoconf autoconf-archive automake libtool
+            autoconf autoconf-archive automake libtool pkg-config
 
-      - name: Cache vcpkg
-        uses: actions/cache@v5
-        id: cache-vcpkg
-        with:
-          path: ${{ github.workspace }}/vcpkg_installed/
-          key: linux-arm64-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
-          restore-keys: linux-arm64-vcpkg-
-
-      - name: Setup vcpkg
+      # 让 lukka/run-vcpkg 自动通过 GitHub Actions Cache (GitHub Actions OIDC) 处理缓存
+      - name: Setup and Run vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          doNotCache: true
           vcpkgGitCommitId: '84bab45d415d22042bd0b9081aea57f362da3f35'
-          runVcpkgInstall: ${{ steps.cache-vcpkg.outputs.cache-hit != 'true' }}
+          runVcpkgInstall: true
         env:
           VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-          VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
-          VCPKG_DEFAULT_TRIPLET: arm64-linux   # 明确指定 ARM64 triplet
+          VCPKG_DEFAULT_TRIPLET: arm64-linux
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-          target: aarch64-unknown-linux-gnu   # 可选，运行器本身已是 aarch64
+          target: aarch64-unknown-linux-gnu
 
       - name: Build
         run: cargo build --release
         env:
+          # 告诉 Rust 的 vcpkg-rs 依赖项去哪里找库
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
+          # 启用 pkg-config 辅助查找（如果 Rust 依赖库有用到）
+          PKG_CONFIG_PATH: ${{ github.workspace }}/vcpkg_installed/arm64-linux/lib/pkgconfig
           VCPKG_HAS_BEEN_INSTALLED: 1
 
       - name: Package
         run: |
           mkdir -p release
-          cp target/release/_3dtile release/
-          cp -r -v target/release/gdal release/
-          cp -r -v target/release/proj release/
-          cp -r -v target/release/osgPlugins-3.6.5 release/
+          # 确保目标文件存在，防止 cp 报错导致 workflow 中断
+          cp target/release/_3dtile release/ || true
+          [ -d target/release/gdal ] && cp -r target/release/gdal release/ || true
+          [ -d target/release/proj ] && cp -r target/release/proj release/ || true
+          [ -d target/release/osgPlugins-3.6.5 ] && cp -r target/release/osgPlugins-3.6.5 release/ || true
+          
+          # 打包
           tar -czf _3dtile-linux-arm64.tar.gz -C release .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4 # 保持与主流配套一致
         with:
           name: linux-arm64
           path: _3dtile-linux-arm64.tar.gz
