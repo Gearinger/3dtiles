@@ -23,16 +23,23 @@ jobs:
             libx11-dev libxrandr-dev libxi-dev libxxf86vm-dev \
             autoconf autoconf-archive automake libtool pkg-config
 
-      - name: Setup and Run vcpkg
+      - name: Setup vcpkg Environment (with Cache)
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: '84bab45d415d22042bd0b9081aea57f362da3f35'
-          runVcpkgInstall: true
+          runVcpkgInstall: false # 🌟 核心改变：只初始化环境，不让它代劳执行 install
         env:
-          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-          VCPKG_DEFAULT_TRIPLET: arm64-linux
-          # 核心修正：利用环境变量给所有 vcpkg 命令默认追加该参数
-          VCPKG_COMMAND_OPTIONS: "--allow-unsupported"
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite" # 依旧保留高效的 GHA 缓存机制
+
+      - name: Run vcpkg install with custom flags
+        run: |
+          # 显式调用已经由 Action 准备好的 vcpkg，并自由注入我们需要的参数
+          ${{ github.workspace }}/vcpkg/vcpkg install \
+            --triplet=arm64-linux \
+            --x-install-root=${{ github.workspace }}/vcpkg_installed \
+            --allow-unsupported \
+            --recurse \
+            --clean-after-build
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -43,10 +50,8 @@ jobs:
       - name: Build
         run: cargo build --release
         env:
-          # 告诉 Rust 的 vcpkg-rs 依赖项去哪里找库
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
           VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
-          # 启用 pkg-config 辅助查找（如果 Rust 依赖库有用到）
           PKG_CONFIG_PATH: ${{ github.workspace }}/vcpkg_installed/arm64-linux/lib/pkgconfig
           VCPKG_HAS_BEEN_INSTALLED: 1
 
