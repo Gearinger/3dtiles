@@ -1,0 +1,69 @@
+name: Build Linux ARM64
+
+on:
+  workflow_dispatch:          # 允许手动触发
+  push:
+    branches: [ main, master ]  # 可根据需要调整
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm   # GitHub 官方 ARM64 运行器
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev libglu1-mesa-dev \
+            libx11-dev libxrandr-dev libxi-dev libxxf86vm-dev \
+            autoconf autoconf-archive automake libtool
+
+      - name: Cache vcpkg
+        uses: actions/cache@v5
+        id: cache-vcpkg
+        with:
+          path: ${{ github.workspace }}/vcpkg_installed/
+          key: linux-arm64-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: linux-arm64-vcpkg-
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          doNotCache: true
+          vcpkgGitCommitId: '84bab45d415d22042bd0b9081aea57f362da3f35'
+          runVcpkgInstall: ${{ steps.cache-vcpkg.outputs.cache-hit != 'true' }}
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+          VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
+          VCPKG_DEFAULT_TRIPLET: arm64-linux   # 明确指定 ARM64 triplet
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-unknown-linux-gnu   # 可选，运行器本身已是 aarch64
+
+      - name: Build
+        run: cargo build --release
+        env:
+          VCPKG_HAS_BEEN_INSTALLED: 1
+
+      - name: Package
+        run: |
+          mkdir -p release
+          cp target/release/_3dtile release/
+          cp -r -v target/release/gdal release/
+          cp -r -v target/release/proj release/
+          cp -r -v target/release/osgPlugins-3.6.5 release/
+          tar -czf _3dtile-linux-arm64.tar.gz -C release .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-arm64
+          path: _3dtile-linux-arm64.tar.gz
