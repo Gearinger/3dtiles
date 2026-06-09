@@ -1,7 +1,13 @@
 name: Build Linux ARM64
 
 on:
-  workflow_dispatch:          # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      package:
+        description: '打包并上传产物'
+        required: true
+        default: true
+        type: boolean
   push:
     branches: [ main, master ]
   pull_request:
@@ -9,9 +15,9 @@ on:
 
 jobs:
   build-linux-arm64:
-    runs-on: ubuntu-24.04-arm   # GitHub 官方 ARM64 运行器
+    runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4 # 建议使用稳定 v4
+      - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
 
@@ -27,19 +33,19 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: '84bab45d415d22042bd0b9081aea57f362da3f35'
-          runVcpkgInstall: false # 🌟 核心改变：只初始化环境，不让它代劳执行 install
+          runVcpkgInstall: false
         env:
-          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite" # 依旧保留高效的 GHA 缓存机制
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
-      - name: Run vcpkg install with custom flags
+      - name: Run vcpkg install (using vcpkg.json manifest)
         run: |
-          # 显式调用已经由 Action 准备好的 vcpkg，并自由注入我们需要的参数
           ${{ github.workspace }}/vcpkg/vcpkg install \
             --triplet=arm64-linux \
             --x-install-root=${{ github.workspace }}/vcpkg_installed \
             --allow-unsupported \
             --recurse \
             --clean-after-build
+        # 注意：需要仓库根目录存在 vcpkg.json 列出所有依赖
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -56,19 +62,18 @@ jobs:
           VCPKG_HAS_BEEN_INSTALLED: 1
 
       - name: Package
+        if: github.event_name == 'workflow_dispatch' && inputs.package == true || github.event_name != 'workflow_dispatch'
         run: |
           mkdir -p release
-          # 确保目标文件存在，防止 cp 报错导致 workflow 中断
           cp target/release/_3dtile release/ || true
-          [ -d target/release/gdal ] && cp -r target/release/gdal release/ || true
-          [ -d target/release/proj ] && cp -r target/release/proj release/ || true
-          [ -d target/release/osgPlugins-3.6.5 ] && cp -r target/release/osgPlugins-3.6.5 release/ || true
-          
-          # 打包
+          cp -r target/release/gdal release/ 2>/dev/null || true
+          cp -r target/release/proj release/ 2>/dev/null || true
+          cp -r target/release/osgPlugins-3.6.5 release/ 2>/dev/null || true
           tar -czf _3dtile-linux-arm64.tar.gz -C release .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4 # 保持与主流配套一致
+        if: github.event_name == 'workflow_dispatch' && inputs.package == true || github.event_name != 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
         with:
           name: linux-arm64
           path: _3dtile-linux-arm64.tar.gz
