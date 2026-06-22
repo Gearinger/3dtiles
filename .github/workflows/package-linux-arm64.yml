@@ -21,6 +21,7 @@ jobs:
         with:
           submodules: 'recursive'
 
+      # 1. 安装系统依赖
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -29,7 +30,17 @@ jobs:
             libx11-dev libxrandr-dev libxi-dev libxxf86vm-dev \
             autoconf autoconf-archive automake libtool pkg-config
 
-      - name: Setup vcpkg Environment (with Cache)
+      # 2. 缓存 vcpkg_installed 目录（关键优化）
+      - name: Cache vcpkg_installed
+        uses: actions/cache@v4
+        id: cache-vcpkg
+        with:
+          path: ${{ github.workspace }}/vcpkg_installed
+          key: linux-arm64-vcpkg-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: linux-arm64-vcpkg-
+
+      # 3. 设置 vcpkg 环境（仅下载工具）
+      - name: Setup vcpkg Environment
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: '84bab45d415d22042bd0b9081aea57f362da3f35'
@@ -37,7 +48,9 @@ jobs:
         env:
           VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
-      - name: Run vcpkg install (using vcpkg.json manifest)
+      # 4. 仅在缓存未命中时安装依赖
+      - name: Run vcpkg install
+        if: steps.cache-vcpkg.outputs.cache-hit != 'true'
         run: |
           ${{ github.workspace }}/vcpkg/vcpkg install \
             --triplet=arm64-linux \
@@ -45,31 +58,34 @@ jobs:
             --allow-unsupported \
             --recurse \
             --clean-after-build
-        # 注意：需要仓库根目录存在 vcpkg.json 列出所有依赖
 
+      # 5. 安装 Rust 工具链（删除多余的 target 指定）
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
 
+      # 6. 构建（环境变量保持不变）
       - name: Build
-        run: cargo build --release
+        run: cargo build --release -vv
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
           VCPKG_INSTALLED_DIR: ${{ github.workspace }}/vcpkg_installed
           PKG_CONFIG_PATH: ${{ github.workspace }}/vcpkg_installed/arm64-linux/lib/pkgconfig
           VCPKG_HAS_BEEN_INSTALLED: 1
 
+      # 7. 打包（只打包可执行文件，动态库依赖需另行处理）
       - name: Package
         if: github.event_name == 'workflow_dispatch' && inputs.package == true || github.event_name != 'workflow_dispatch'
         run: |
           mkdir -p release
-          cp target/release/_3dtile release/ || true
-          cp -r target/release/gdal release/ 2>/dev/null || true
-          cp -r target/release/proj release/ 2>/dev/null || true
-          cp -r target/release/osgPlugins-3.6.5 release/ 2>/dev/null || true
+          # 只复制可执行文件（如果项目是静态链接，这足够了）
+          cp target/release/_3dtile release/
+          # 如果需要动态库，可以从 vcpkg_installed 复制，示例：
+          # cp -L ${{ github.workspace }}/vcpkg_installed/arm64-linux/lib/*.so* release/ || true
           tar -czf _3dtile-linux-arm64.tar.gz -C release .
 
+      # 8. 上传产物
       - name: Upload artifact
         if: github.event_name == 'workflow_dispatch' && inputs.package == true || github.event_name != 'workflow_dispatch'
         uses: actions/upload-artifact@v4
