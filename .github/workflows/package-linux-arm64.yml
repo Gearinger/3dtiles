@@ -2,7 +2,7 @@ name: Build and Push ARM64 Docker Image
 
 on:
   push:
-    branches: [ "master" ]  # 当主分支代码更新时触发（注意：原仓库的主分支名为 master）
+    branches: [ "master" ]  # 当 master 分支代码更新时触发
   workflow_dispatch:        # 支持在 GitHub 网页手动点击触发
 
 env:
@@ -12,8 +12,8 @@ env:
 
 jobs:
   build-arm64:
-    # 核心：使用 GitHub 官方提供的原生 ARM 架构物理服务器 (免费提供给公共开源仓库)
-    # 这样可以避免使用 QEMU 模拟编译，使 C++ 的 vcpkg 编译速度提升 10 倍以上，防止超时
+    # 使用 GitHub 官方提供的原生 ARM 架构物理服务器 (免费提供给公共开源仓库)
+    # 避免使用 QEMU 模拟编译，使 C++ 的 vcpkg 编译速度提升 10 倍以上，防止超时
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -55,8 +55,8 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ id.meta.outputs.tags }}
-          labels: ${{ id.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           # 启用 Actions 缓存，第二次构建时如果代码无大变动，直接复用已编译的依赖包
           cache-from: type=gha
           cache-to: type=gha,mode=max
