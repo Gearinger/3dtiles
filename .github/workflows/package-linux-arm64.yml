@@ -2,18 +2,17 @@ name: Build and Push ARM64 Docker Image
 
 on:
   push:
-    branches: [ "master" ]  # 当 master 分支代码更新时触发
-  workflow_dispatch:        # 支持在 GitHub 网页手动点击触发
+    branches: [ "master" ]  # 当代码推送到 master 主分支时触发
+  workflow_dispatch:        # 支持在 GitHub Actions 页面手动点击按钮触发
 
 env:
   REGISTRY: ghcr.io
-  # 镜像名称会保存为 ghcr.io/你的用户名/3dtiles
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-arm64:
-    # 使用 GitHub 官方提供的原生 ARM 架构物理服务器 (免费提供给公共开源仓库)
-    # 避免使用 QEMU 模拟编译，使 C++ 的 vcpkg 编译速度提升 10 倍以上，防止超时
+    # 核心：使用 GitHub 提供的原生 ARM64 物理服务器运行（对公共开源项目免费）
+    # 这能避开 QEMU 模拟器翻译 C++ 编译指令所带来的性能损耗，大幅缩减 vcpkg 的编译时间，防止卡死超时
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -23,13 +22,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # C++ 项目编译非常重要：必须拉取子模块
+          # 非常关键：C++ 依赖管理需要下载子模块 (vcpkg 等)
           submodules: recursive
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 登录 GitHub 容器托管服务 (GHCR)
+      # 登录到 GitHub Container Registry (GHCR)
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -37,7 +36,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 提取镜像的 tag 标签信息
+      # 提取镜像的标签与元数据
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -57,6 +56,6 @@ jobs:
           platforms: linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # 启用 Actions 缓存，第二次构建时如果代码无大变动，直接复用已编译的依赖包
+          # 启用 GitHub Actions 缓存优化，后续构建如依赖未变将直接复用，速度更快
           cache-from: type=gha
           cache-to: type=gha,mode=max
