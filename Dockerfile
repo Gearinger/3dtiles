@@ -44,18 +44,12 @@ RUN rustup update stable
 ENV CARGO_TERM_COLOR=always
 ENV VCPKG_HAS_BEEN_INSTALLED=1
 ENV VCPKG_INSTALLED_DIR=/app/vcpkg_installed
-ENV VCPKG_DEFAULT_TRIPLET=$( \
-    if [ "$TARGETARCH" = "arm64" ]; then \
-        echo "arm64-linux"; \
-    else \
-        echo "x64-linux"; \
-    fi)
 
 RUN $VCPKG_ROOT/vcpkg install \
+    --triplet=$(if [ "$TARGETARCH" = "arm64" ]; then echo "arm64-linux"; else echo "x64-linux"; fi) \
     --recurse \
     --clean-after-build \
     --x-install-root=$VCPKG_INSTALLED_DIR \
-    --triplet=$VCPKG_DEFAULT_TRIPLET \
     --allow-unsupported
 
 RUN cargo build --release -vv
